@@ -68,61 +68,61 @@ int main(int argc, char **argv)
 
 	/* =========================== AREA OF INTEREST ============================ */
 
-	int local_rows = Ndim / size;
+int local_rows = Ndim / size;
 
-	double *local_A = (double *)malloc(
-		local_rows * Pdim * sizeof(double)
-	);
+double *local_A = (double *)malloc(
+    local_rows * Pdim * sizeof(double)
+);
 
-	double *local_C = (double *)calloc(
-		local_rows * Mdim,
-		sizeof(double)
-	);
+double *local_C = (double *)calloc(
+    local_rows * Mdim,
+    sizeof(double)
+);
 
-	MPI_Bcast(
-		B,
-		Pdim * Mdim,
-		MPI_DOUBLE,
-		0,
-		MPI_COMM_WORLD
-	);
+MPI_Bcast(
+    B,
+    Pdim * Mdim,
+    MPI_DOUBLE,
+    0,
+    MPI_COMM_WORLD
+);
 
-	MPI_Scatter(
-		A,
-		local_rows * Pdim,
-		MPI_DOUBLE,
-		local_A,
-		local_rows * Pdim,
-		MPI_DOUBLE,
-		0,
-		MPI_COMM_WORLD
-	);
+MPI_Scatter(
+    rank == 0 ? A : NULL,
+    local_rows * Pdim,
+    MPI_DOUBLE,
+    local_A,
+    local_rows * Pdim,
+    MPI_DOUBLE,
+    0,
+    MPI_COMM_WORLD
+);
 
-	for (i=0; i<local_rows; i++) {
-		for (j=0; j<Mdim; j++) {
-			for (k=0; k<Pdim; k++) {
-				local_C[i*Mdim+j] +=
-					local_A[i*Pdim+k] *
-					B[k*Mdim+j];
-			}
-		}
-	}
+for (i = 0; i < local_rows; i++) {
+    for (j = 0; j < Mdim; j++) {
+        for (k = 0; k < Pdim; k++) {
+            local_C[i * Mdim + j] +=
+                local_A[i * Pdim + k] *
+                B[k * Mdim + j];
+        }
+    }
+}
 
-	MPI_Gather(
-		local_C,
-		local_rows * Mdim,
-		MPI_DOUBLE,
-		C,
-		local_rows * Mdim,
-		MPI_DOUBLE,
-		0,
-		MPI_COMM_WORLD
-	);
+MPI_Gather(
+    local_C,
+    local_rows * Mdim,
+    MPI_DOUBLE,
+    rank == 0 ? C : NULL,
+    local_rows * Mdim,
+    MPI_DOUBLE,
+    0,
+    MPI_COMM_WORLD
+);
 
-	free(local_A);
-	free(local_C);
+free(local_A);
+free(local_C);
 
-	/* ========================= END AREA OF INTEREST ========================== */
+/* ========================= END AREA OF INTEREST ========================== */
 
 	run_time = MPI_Wtime() - start_time;
 
