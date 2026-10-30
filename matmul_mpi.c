@@ -25,14 +25,14 @@ int main(int argc, char **argv)
 	int Ndim, Pdim, Mdim;   /* A[N][P], B[P][M], C[N][M] */
 	int i,j,k;
 	double *A, *B, *C, cval, err, errsq;
-      double dN, mflops;
+	double dN, mflops;
 	double start_time, run_time;
-    int rank, size;
+	int rank, size;
 
-    if (argc < 2) {
-        printf("Usage: %s <matrix_order>\n", argv[0]);
-        return -1;
-    }
+	if (argc < 2) {
+		printf("Usage: %s <matrix_order>\n", argv[0]);
+		return -1;
+	}
 
 	int order = atoi(argv[1]);
 	Ndim = order;
@@ -41,74 +41,152 @@ int main(int argc, char **argv)
 
 	/* Initialize matrices */
 
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    B = (double *)malloc(Pdim*Mdim*sizeof(double));
-    if (rank == 0) {
-        A = (double *)malloc(Ndim*Pdim*sizeof(double));
-        C = (double *)malloc(Ndim*Mdim*sizeof(double));
+	B = (double *)malloc(Pdim*Mdim*sizeof(double));
 
-        for (i=0; i<Ndim; i++)
-            for (j=0; j<Pdim; j++)
-                *(A+(i*Ndim+j)) = AVAL;
+	if (rank == 0) {
+		A = (double *)malloc(Ndim*Pdim*sizeof(double));
+		C = (double *)malloc(Ndim*Mdim*sizeof(double));
 
-        for (i=0; i<Pdim; i++)
-            for (j=0; j<Mdim; j++)
-                *(B+(i*Pdim+j)) = BVAL;
+		for (i=0; i<Ndim; i++)
+			for (j=0; j<Pdim; j++)
+				*(A+(i*Ndim+j)) = AVAL;
 
-        for (i=0; i<Ndim; i++)
-            for (j=0; j<Mdim; j++)
-                *(C+(i*Ndim+j)) = 0.0;
-    }
+		for (i=0; i<Pdim; i++)
+			for (j=0; j<Mdim; j++)
+				*(B+(i*Pdim+j)) = BVAL;
 
-    start_time = MPI_Wtime();
-    /* =========================== AREA OF INTEREST ============================ */
+		for (i=0; i<Ndim; i++)
+			for (j=0; j<Mdim; j++)
+				*(C+(i*Ndim+j)) = 0.0;
+	}
 
-    /* Do the matrix product */
-    for (i=0; i<Ndim; i++){
-		for (j=0; j<Mdim; j++){
-			for(k=0;k<Pdim;k++){
-				/* C(i,j) = sum(over k) A(i,k) * B(k,j) */
-				*(C+(i*Ndim+j)) += *(A+(i*Ndim+k)) *  *(B+(k*Pdim+j));
+	start_time = MPI_Wtime();
+
+	/* =========================== AREA OF INTEREST ============================ */
+
+	int local_rows = Ndim / size;
+
+	double *local_A = (double *)malloc(
+		local_rows * Pdim * sizeof(double)
+	);
+
+	double *local_C = (double *)calloc(
+		local_rows * Mdim,
+		sizeof(double)
+	);
+
+	MPI_Bcast(
+		B,
+		Pdim * Mdim,
+		MPI_DOUBLE,
+		0,
+		MPI_COMM_WORLD
+	);
+
+	MPI_Scatter(
+		A,
+		local_rows * Pdim,
+		MPI_DOUBLE,
+		local_A,
+		local_rows * Pdim,
+		MPI_DOUBLE,
+		0,
+		MPI_COMM_WORLD
+	);
+
+	for (i=0; i<local_rows; i++) {
+		for (j=0; j<Mdim; j++) {
+			for (k=0; k<Pdim; k++) {
+				local_C[i*Mdim+j] +=
+					local_A[i*Pdim+k] *
+					B[k*Mdim+j];
 			}
 		}
 	}
 
-    /* ========================= END AREA OF INTEREST ========================== */
+	MPI_Gather(
+		local_C,
+		local_rows * Mdim,
+		MPI_DOUBLE,
+		C,
+		local_rows * Mdim,
+		MPI_DOUBLE,
+		0,
+		MPI_COMM_WORLD
+	);
+
+	free(local_A);
+	free(local_C);
+
+	/* ========================= END AREA OF INTEREST ========================== */
+
 	run_time = MPI_Wtime() - start_time;
- 
+
 	if (rank == 0) {
-        double max_time;
-        MPI_Reduce(&run_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+		double max_time;
 
-        printf("Order %d multiplication in %f seconds\n", order, run_time);
+		MPI_Reduce(
+			&run_time,
+			&max_time,
+			1,
+			MPI_DOUBLE,
+			MPI_MAX,
+			0,
+			MPI_COMM_WORLD
+		);
 
-        dN = (double)order;
-        mflops = 2.0 * dN * dN * dN / (1.0e6 * run_time);
-        printf("Order %d multiplication at %f mflops\n", order, mflops);
-        // Check the result
-        cval = Pdim * AVAL * BVAL;
-        errsq = 0.0;
-        for (i = 0; i < Ndim; i++)
-            for (j = 0; j < Mdim; j++) {
-                err = C[i * Mdim + j] - cval;
-                errsq += err * err;
-            }
+		printf(
+			"Order %d multiplication in %f seconds\n",
+			order,
+			run_time
+		);
 
-        if (errsq > TOL)
-            printf("Errors in multiplication: %f\n", errsq);
-        else
-            printf("Hey, it worked!\n");
+		dN = (double)order;
 
-        free(A);
-        free(C);
-    } else {
-        MPI_Reduce(&run_time, NULL, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-    }
+		mflops =
+			2.0 * dN * dN * dN /
+			(1.0e6 * run_time);
 
-    free(B);
+		printf(
+			"Order %d multiplication at %f mflops\n",
+			order,
+			mflops
+		);
 
-    MPI_Finalize();
+		// Check the result
+		cval = Pdim * AVAL * BVAL;
+		errsq = 0.0;
+
+		for (i = 0; i < Ndim; i++)
+			for (j = 0; j < Mdim; j++) {
+				err = C[i * Mdim + j] - cval;
+				errsq += err * err;
+			}
+
+		if (errsq > TOL)
+			printf("Errors in multiplication: %f\n", errsq);
+		else
+			printf("Hey, it worked!\n");
+
+		free(A);
+		free(C);
+	} else {
+		MPI_Reduce(
+			&run_time,
+			NULL,
+			1,
+			MPI_DOUBLE,
+			MPI_MAX,
+			0,
+			MPI_COMM_WORLD
+		);
+	}
+
+	free(B);
+
+	MPI_Finalize();
 }
